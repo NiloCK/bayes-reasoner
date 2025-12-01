@@ -111,7 +111,7 @@ python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py split Network Ne
 ### `inject` — Add New Hypothesis Based on Evidence
 
 ```
-python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py inject Hypothesis:probability ...
+python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py inject Hypothesis:probability [--likelihoods Test1:L1 Test2:L2 ...]
 ```
 
 Adds a new hypothesis at the specified probability, **shrinking all existing hypotheses proportionally** to make room. Use this when:
@@ -119,20 +119,22 @@ Adds a new hypothesis at the specified probability, **shrinking all existing hyp
 - A smoking gun emerges that demands a high-probability new hypothesis
 - Evidence points to something outside your current named hypotheses
 
-The probability you assign should reflect the evidence strength, not be constrained by any existing hypothesis's current value.
+The probability you assign should reflect the evidence strength given all context, not be constrained by any existing hypothesis's current value.
+
+**If tests are already defined, you MUST provide `--likelihoods`** for the new hypothesis on each test. This ensures future `recommend` calculations remain valid. Ask yourself: "If this new hypothesis were true, what's the probability each test would pass?"
 
 **Examples:**
 ```
-python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py inject DNSMisconfiguration:0.25
+python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py inject DNS:0.25 --likelihoods CheckLogs:0.7 PingTest:0.3
 ```
-*Adds DNS at 25%, shrinks all existing hypotheses (including Other) by 25%.*
+*Adds DNS at 25% with explicit likelihoods for existing tests.*
 
 ```
-python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py inject BuildCache:0.90
+python3 ~/.claude/skills/bayes-reasoner/scripts/bayes_engine.py inject BuildCache:0.90 --likelihoods CheckLogs:0.1 PingTest:0.5
 ```
 *Smoking gun: adds BuildCache at 90%, crushes everything else to 10% total (preserving relative ordering).*
 
-**Note:** Existing tests will use likelihood=0.5 (neutral) for the new hypothesis. The injected probability must be less than 1.
+**Note:** The injected probability must be less than 1. If no tests are defined, `--likelihoods` is not required.
 
 ### `reset` — Clear All State
 

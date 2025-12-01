@@ -295,10 +295,14 @@ def cmd_inject(args):
     Inject a new hypothesis at a specified probability, shrinking all others proportionally.
 
     Example: inject BuildCache:0.95
+    Example: inject DNS:0.25 --likelihoods CheckLogs:0.7 PingTest:0.3
 
     Use this when a smoking gun emerges—new evidence that demands a new hypothesis
     at high probability. All existing hypotheses shrink proportionally to make room,
     preserving their relative ordering.
+
+    If tests are already defined, you MUST provide likelihoods for the new hypothesis
+    via --likelihoods, to ensure future test recommendations remain valid.
     """
     state = load_state()
     hypotheses = state["hypotheses"]
@@ -340,6 +344,43 @@ def cmd_inject(args):
             "error": f"Cannot inject existing hypotheses: {conflicts}. Use 'update' to change beliefs about existing hypotheses, or 'reset' and 'init' to start fresh."
         }
 
+    # Parse likelihoods for existing tests
+    provided_likelihoods = {}
+    if args.likelihoods:
+        for item in args.likelihoods:
+            if ":" not in item:
+                return {
+                    "error": f"Invalid likelihood format '{item}'. Use TestName:likelihood format."
+                }
+            test_name, val = item.split(":", 1)
+            try:
+                likelihood = float(val)
+                if not 0 <= likelihood <= 1:
+                    return {
+                        "error": f"Likelihood must be between 0 and 1, got {likelihood} for '{test_name}'."
+                    }
+                provided_likelihoods[test_name] = likelihood
+            except ValueError:
+                return {"error": f"Invalid likelihood '{val}' for test '{test_name}'."}
+
+    # Check that likelihoods are provided for all existing tests
+    existing_tests = set(state["tests"].keys())
+    if existing_tests:
+        provided_tests = set(provided_likelihoods.keys())
+        missing_tests = existing_tests - provided_tests
+        unknown_tests = provided_tests - existing_tests
+
+        if unknown_tests:
+            return {
+                "error": f"Unknown tests in --likelihoods: {unknown_tests}. Defined tests: {list(existing_tests)}"
+            }
+
+        if missing_tests:
+            return {
+                "error": f"Must provide likelihoods for all defined tests. Missing: {list(missing_tests)}. "
+                f"Use --likelihoods {' '.join(f'{t}:0.5' for t in missing_tests)} (adjust values as appropriate)."
+            }
+
     # Shrink existing hypotheses proportionally
     shrink_factor = 1 - total_injection
     for h in hypotheses:
@@ -349,11 +390,11 @@ def cmd_inject(args):
     for h, prob in injections.items():
         hypotheses[h] = prob
 
-    # Update test likelihoods: new hypotheses default to 0.5
+    # Update test likelihoods for new hypotheses
     for test_name, likelihoods in state["tests"].items():
         for h in injections:
-            if h not in likelihoods:
-                likelihoods[h] = 0.5
+            # Use provided likelihood, or this shouldn't happen (we checked above)
+            likelihoods[h] = provided_likelihoods.get(test_name, 0.5)
 
     state["hypotheses"] = hypotheses
     save_state(state)
@@ -370,7 +411,6 @@ def cmd_inject(args):
         "message": f"Injected {len(injections)} hypothesis(es). Existing hypotheses shrunk by {shrink_factor:.1%}.",
         "beliefs": get_beliefs_list(hypotheses),
         "tests_defined": list(state["tests"].keys()),
-        "note": "Existing tests use likelihood=0.5 (neutral) for new hypotheses. Consider redefining tests with specific likelihoods.",
     }
     if warning:
         result["warning"] = warning
@@ -534,11 +574,11 @@ Examples:
   # Split a named hypothesis into sub-categories
   %(prog)s split Network NetworkTimeout:0.6 NetworkDNS:0.4
 
-  # Add a new hypothesis discovered from investigating "Other"
-  %(prog)s inject DNSMisconfiguration:0.25
+  # Add a new hypothesis (with likelihoods for existing tests)
+  %(prog)s inject DNS:0.25 --likelihoods CheckLogs:0.7 PingTest:0.3
 
   # Inject a smoking-gun hypothesis (shrinks all others proportionally)
-  %(prog)s inject BuildCache:0.90
+  %(prog)s inject BuildCache:0.90 --likelihoods CheckLogs:0.1 PingTest:0.1
 
   # View current state
   %(prog)s status
@@ -592,6 +632,12 @@ Examples:
         nargs="+",
         metavar="H:prob",
         help="Hypothesis:probability pairs to inject (others shrink proportionally)",
+    )
+    p_inject.add_argument(
+        "--likelihoods",
+        nargs="+",
+        metavar="Test:likelihood",
+        help="Likelihoods for new hypothesis on existing tests (required if tests are defined)",
     )
 
     p_upd = subparsers.add_parser("update", help="Update beliefs with test result")
